@@ -105,6 +105,9 @@ signal changed(new_value)
 var rng: RandomNumberGenerator
 var noise: FastNoiseLite
 
+# Queue<MapThreadInfo<MapData>>
+var map_data_thread_info_queue: Queue
+var map_mutex: Mutex
 	
 func _init():
 	if rng == null:
@@ -113,6 +116,18 @@ func _init():
 		noise = FastNoiseLite.new()
 		
 	noise.noise_type = FastNoiseLite.TYPE_PERLIN
+	
+	map_data_thread_info_queue = Queue.new(10)
+	map_mutex = Mutex.new()
+	
+	
+func _process(_delta):
+	if (map_data_thread_info_queue.size == 0):
+		return
+		
+	# Pop element from the queue and run its callback method
+	var map_thread_info = map_data_thread_info_queue.dequeue() as MapThreadInfo
+	map_thread_info.callback.call(map_thread_info.arg)
 	
 	
 func _get_tool_buttons() -> Array:
@@ -156,14 +171,6 @@ func draw_map_in_editor() -> void:
 			return # ignore other possibilities at the moment
 
 
-func request_map_data(callback: Callable) -> void:
-	var thread: Thread = Thread.new()
-	thread.start(map_data_thread.bind(callback))
-	
-func map_data_thread(callback: Callable) -> void:
-	var map_data: MapData = generate_map_data()
-	# TODO : add locking mechanism
-
 func generate_map_data() -> MapData:
 	var noise_map: Array[Array] = generate_noise_map(MAP_CHUNK_SIZE, MAP_CHUNK_SIZE, random_seed, noise_scale, octaves, persistance, lacunarity, offset)
 	
@@ -179,6 +186,7 @@ func generate_map_data() -> MapData:
 					break
 	
 	return MapData.new(noise_map, color_map)
+
 
 # generate a 2-dimensional array of random values for the specified resolution and scale
 func generate_noise_map(_width: int, _height: int, _seed: int, _texture_scale: float, _octaves: int, _persistance: float, _lacunarity: float, _offset: Vector2) -> Array[Array]:
@@ -236,6 +244,7 @@ func generate_noise_map(_width: int, _height: int, _seed: int, _texture_scale: f
 			
 	return noise_map
 
+
 # generate a mesh from a 2-dimensional height map
 func generate_terrain_mesh(_height_map: Array[Array], _height_multiplier: float, _height_curve: Curve, _level_of_detail: int, _width: int, _height: int) -> MeshData:
 	var top_left_x: float = (_width - 1) / -2.0
@@ -264,6 +273,7 @@ func generate_terrain_mesh(_height_map: Array[Array], _height_multiplier: float,
 			
 	return mesh_data
 
+
 # Utilities #
 
 func texture_from_color_map(_color_map: Array[Color], _width: int, _height: int) -> ImageTexture:
@@ -276,6 +286,7 @@ func texture_from_color_map(_color_map: Array[Color], _width: int, _height: int)
 	var texture: ImageTexture = ImageTexture.create_from_image(image)
 	return texture
 	
+	
 func texture_from_height_map(_height_map: Array[Array], _width: int, _height: int) -> ImageTexture:
 	var color_map: Array[Color] = []
 	color_map.resize(_width * _height)
@@ -284,3 +295,19 @@ func texture_from_height_map(_height_map: Array[Array], _width: int, _height: in
 			color_map[y * _width + x] = lerp(Color.BLACK, Color.WHITE, _height_map[x][y])
 			
 	return texture_from_color_map(color_map, _width, _height)
+	
+
+# Threading Utilities #
+
+func request_map_data(callback: Callable) -> void:
+	var thread: Thread = Thread.new()
+	thread.start(map_data_thread.bind(callback))
+	
+	
+func map_data_thread(callback: Callable) -> void:
+	var map_data: MapData = generate_map_data()
+	var map_thread_info: MapThreadInfo = MapThreadInfo.new(callback, map_data)
+	
+	map_mutex.lock()
+	map_data_thread_info_queue.enqueue(map_thread_info)
+	map_mutex.unlock()

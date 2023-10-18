@@ -12,12 +12,28 @@ var chunks_visible_in_view_dst: int
 var terrain_chunk_dictionary: Dictionary
 var last_visible_terrain_chunks: Array[TerrainChunk]
 
+var terrain_generator: TerrainGenerator
+
 func _init():
 	chunk_size = TerrainGenerator.MAP_CHUNK_SIZE - 1
 	chunks_visible_in_view_dst = roundi(MAX_VIEW_DST / chunk_size)
 	terrain_chunk_dictionary = {}
 	last_visible_terrain_chunks = []
 	
+	
+func _ready():
+	terrain_generator = get_parent() as TerrainGenerator
+	
+	if not terrain_generator:
+		push_warning('Could not find TerrainGenerator node, no further request will be made.')
+		return
+		
+	terrain_generator.request_map_data(on_map_data_received)
+	
+
+func on_map_data_received(_map_data: MapData) -> void:
+	print("Map data received !")
+
 
 #func _ready():
 #	if OS.is_debug_build():
