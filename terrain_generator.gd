@@ -19,13 +19,13 @@ signal changed(new_value)
 		draw_mode = value
 
 @export_category("Noise Settings")
-@export_range(0, 6) var level_of_detail: int = 0:
+@export_range(0, 6) var editor_preview_lod: int = 0:
 	get:
-		return level_of_detail
+		return editor_preview_lod
 	set(value):
 		if (auto_update):
 			changed.emit(value)
-		level_of_detail = value
+		editor_preview_lod = value
 
 @export_range(1, 50) var height_multiplier: float = 1:
 	get:
@@ -107,12 +107,11 @@ var noise: FastNoiseLite
 
 # Queue<ThreadOperation<MapData | MeshData>>
 var result_queue: Array = []
-
 var task_queue: Array = []
-
 
 var thread_pool: Array = []
 var max_threads: int = 2
+var max_chunks_per_frame: int = 2
 
 var lock: Mutex
 var semaphore: Semaphore
@@ -126,6 +125,8 @@ func _init():
 		
 	noise.noise_type = FastNoiseLite.TYPE_PERLIN
 	
+	
+func _ready():
 	lock = Mutex.new()
 	semaphore = Semaphore.new()
 	
@@ -139,12 +140,10 @@ func _process(_delta):
 	lock.lock()
 	if (result_queue.size() > 0):
 		# Pop element from the queue and run its callback method
-		for i in range(result_queue.size()):
-			lock.lock()
+		for i in range(min(max_chunks_per_frame, result_queue.size())):
 			var result = result_queue.pop_front() as ThreadOperation
-			lock.unlock()
 			
-			result.callback.call(result.arg)
+			result.callback.call_deferred(result.arg)
 	lock.unlock()
 	
 	
@@ -181,7 +180,7 @@ func draw_map_in_editor() -> void:
 		print("No 'MeshDisplay' node found, cannot draw mesh.")
 		return
 		
-	var map_data: MapData = generate_map_data()
+	var map_data: MapData = generate_map_data(Vector2.ZERO)
 	
 	match draw_mode:
 		DrawMode.DrawMode.NoiseMap:
@@ -190,15 +189,15 @@ func draw_map_in_editor() -> void:
 			display.draw_texture(texture_from_color_map(map_data.color_map, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE))
 		DrawMode.DrawMode.Mesh:
 			mesh_display.draw_mesh(
-				generate_terrain_mesh(map_data.height_map, height_multiplier, mesh_height_curve, level_of_detail, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE), 
+				generate_terrain_mesh(map_data.height_map, height_multiplier, mesh_height_curve, editor_preview_lod, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE), 
 				texture_from_color_map(map_data.color_map, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE)
 			)
 		_: 
 			return # ignore other possibilities at the moment
 
 
-func generate_map_data() -> MapData:
-	var noise_map: Array[Array] = generate_noise_map(MAP_CHUNK_SIZE, MAP_CHUNK_SIZE, random_seed, noise_scale, octaves, persistance, lacunarity, offset)
+func generate_map_data(center: Vector2) -> MapData:
+	var noise_map: Array[Array] = generate_noise_map(MAP_CHUNK_SIZE, MAP_CHUNK_SIZE, random_seed, noise_scale, octaves, persistance, lacunarity, center + offset)
 	
 	# assign colors to each region
 	var color_map: Array[Color] = []
@@ -333,23 +332,23 @@ func thread_worker_callback() -> void:
 		lock.lock()
 		if task_queue.size() > 0:
 			var task = task_queue.pop_front() as Callable
-			task.call()
+			task.call_deferred()
 		else:
 			lock.unlock()
 			continue
 		lock.unlock()
 	
 	
-func request_map_data(completed_callback: Callable) -> void:
+func request_map_data(center: Vector2, completed_callback: Callable) -> void:
 	lock.lock()
-	task_queue.append(map_data_thread.bind(completed_callback))
+	task_queue.append(map_data_thread.bind(center, completed_callback))
 	lock.unlock()
 	semaphore.post()
 	
 	
 # Will be executed on another thread
-func map_data_thread(completed_callback: Callable) -> void:
-	var map_data: MapData = generate_map_data()
+func map_data_thread(center: Vector2, completed_callback: Callable) -> void:
+	var map_data: MapData = generate_map_data(center)
 	var map_task: ThreadOperation = ThreadOperation.new(completed_callback, map_data)
 	
 	lock.lock()
@@ -357,16 +356,16 @@ func map_data_thread(completed_callback: Callable) -> void:
 	lock.unlock()
 	
 	
-func request_mesh_data(map_data: MapData, completed_callback: Callable) -> void:
+func request_mesh_data(map_data: MapData, lod: int, completed_callback: Callable) -> void:
 	lock.lock()
-	task_queue.append(mesh_data_thread.bind(map_data, completed_callback))
+	task_queue.append(mesh_data_thread.bind(map_data, lod, completed_callback))
 	lock.unlock()
 	semaphore.post()
 	
 	
 # Will be executed on another thread
-func mesh_data_thread(map_data: MapData, completed_callback: Callable) -> void:
-	var mesh_data: MeshData = generate_terrain_mesh(map_data.height_map, height_multiplier, mesh_height_curve, level_of_detail, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE)
+func mesh_data_thread(map_data: MapData, lod: int, completed_callback: Callable) -> void:
+	var mesh_data: MeshData = generate_terrain_mesh(map_data.height_map, height_multiplier, mesh_height_curve, lod, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE)
 	var mesh_task: ThreadOperation = ThreadOperation.new(completed_callback, mesh_data)
 	
 	lock.lock()

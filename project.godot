@@ -17,6 +17,10 @@ run/main_scene="res://terrain_generator.tscn"
 config/features=PackedStringArray("4.1", "Forward Plus")
 config/icon="res://icon.svg"
 
+[autoload]
+
+Shared="*res://shared.gd"
+
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/tool_button/plugin.cfg")

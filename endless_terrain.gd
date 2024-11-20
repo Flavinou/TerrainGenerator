@@ -2,26 +2,30 @@ extends Node3D
 
 class_name EndlessTerrain
 
-const MAX_VIEW_DST: float = 450
+const VIEWER_MOVE_THRESHOLD_CHUNK_UPDATE: float = 25
+const SQR_VIEWER_MOVE_THRESHOLD_CHUNK_UPDATE: float = VIEWER_MOVE_THRESHOLD_CHUNK_UPDATE * VIEWER_MOVE_THRESHOLD_CHUNK_UPDATE
+
+var max_view_distance: float = 450
+var viewer_position: Vector2
+var old_viewer_position: Vector2
 
 @export var viewer: Node3D
 @export var material: Material
+@export var detail_levels: Array[LODInfo] = []
 
 var chunk_size: int
 var chunks_visible_in_view_dst: int
 
-var terrain_chunk_dictionary: Dictionary
-var last_visible_terrain_chunks: Array[TerrainChunk]
+var terrain_chunk_dictionary: Dictionary = {}
+var last_visible_terrain_chunks: Array[TerrainChunk] = []
 
-
-func _init():
+func _ready():
+	max_view_distance = detail_levels[-1].visible_distance_threshold
 	chunk_size = TerrainGenerator.MAP_CHUNK_SIZE - 1
-	chunks_visible_in_view_dst = roundi(MAX_VIEW_DST / chunk_size)
-	terrain_chunk_dictionary = {}
-	last_visible_terrain_chunks = []
-
-
-#func _ready():
+	chunks_visible_in_view_dst = roundi(max_view_distance / chunk_size)
+	
+	update_visible_chunks()
+	
 #	if OS.is_debug_build():
 #		RenderingServer.set_debug_generate_wireframes(true)
 #		get_viewport().debug_draw = Viewport.DEBUG_DRAW_WIREFRAME
@@ -29,7 +33,11 @@ func _init():
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
 func _process(_delta):
-	update_visible_chunks()
+	viewer_position = Shared.viewer_position
+	
+	if (old_viewer_position - viewer_position).length_squared() > SQR_VIEWER_MOVE_THRESHOLD_CHUNK_UPDATE:
+		old_viewer_position = viewer_position
+		update_visible_chunks()
 
 
 func update_visible_chunks() -> void:
@@ -41,8 +49,8 @@ func update_visible_chunks() -> void:
 		last_visible_terrain_chunks[i].toggle_visible(false)
 	last_visible_terrain_chunks.clear()
 	
-	var current_chunk_coord_x = roundi(viewer.position.x / chunk_size)
-	var current_chunk_coord_y = roundi(viewer.position.z / chunk_size)
+	var current_chunk_coord_x = roundi(viewer_position.x / chunk_size)
+	var current_chunk_coord_y = roundi(viewer_position.y / chunk_size)
 	
 	for y_offset in range(-chunks_visible_in_view_dst, chunks_visible_in_view_dst):
 		for x_offset in range(-chunks_visible_in_view_dst, chunks_visible_in_view_dst):
@@ -54,10 +62,10 @@ func update_visible_chunks() -> void:
 					push_warning('Be careful when pushing to this dictionary, anything else than a TerrainChunk will not be processed.')
 					break
 					
-				terrain_chunk.update(viewer.position)
+				terrain_chunk.update(viewer_position, max_view_distance)
 				
 				if terrain_chunk.visible:
 					last_visible_terrain_chunks.append(terrain_chunk)
 			else:
-				terrain_chunk_dictionary[viewed_chunk_coord] = TerrainChunk.new(viewed_chunk_coord, chunk_size, self, material)
+				terrain_chunk_dictionary[viewed_chunk_coord] = TerrainChunk.new(viewed_chunk_coord, chunk_size, detail_levels, self, material, max_view_distance)
 
