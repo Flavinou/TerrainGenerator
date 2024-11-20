@@ -5,6 +5,7 @@ class_name EndlessTerrain
 const MAX_VIEW_DST: float = 450
 
 @export var viewer: Node3D
+@export var material: Material
 
 var chunk_size: int
 var chunks_visible_in_view_dst: int
@@ -12,27 +13,12 @@ var chunks_visible_in_view_dst: int
 var terrain_chunk_dictionary: Dictionary
 var last_visible_terrain_chunks: Array[TerrainChunk]
 
-var terrain_generator: TerrainGenerator
 
 func _init():
 	chunk_size = TerrainGenerator.MAP_CHUNK_SIZE - 1
 	chunks_visible_in_view_dst = roundi(MAX_VIEW_DST / chunk_size)
 	terrain_chunk_dictionary = {}
 	last_visible_terrain_chunks = []
-	
-	
-func _ready():
-	terrain_generator = get_parent() as TerrainGenerator
-	
-	if not terrain_generator:
-		push_warning('Could not find TerrainGenerator node, no further request will be made.')
-		return
-		
-	terrain_generator.request_map_data(on_map_data_received)
-	
-
-func on_map_data_received(_map_data: MapData) -> void:
-	print("Map data received !")
 
 
 #func _ready():
@@ -47,6 +33,10 @@ func _process(_delta):
 
 
 func update_visible_chunks() -> void:
+	if not material:
+		push_warning('No material set for the terrain chunks, drawing will not occur.')
+		return
+	
 	for i in range(last_visible_terrain_chunks.size()):
 		last_visible_terrain_chunks[i].toggle_visible(false)
 	last_visible_terrain_chunks.clear()
@@ -69,5 +59,5 @@ func update_visible_chunks() -> void:
 				if terrain_chunk.visible:
 					last_visible_terrain_chunks.append(terrain_chunk)
 			else:
-				terrain_chunk_dictionary[viewed_chunk_coord] = TerrainChunk.new(viewed_chunk_coord, chunk_size)
-				add_child(terrain_chunk_dictionary[viewed_chunk_coord])
+				terrain_chunk_dictionary[viewed_chunk_coord] = TerrainChunk.new(viewed_chunk_coord, chunk_size, self, material)
+

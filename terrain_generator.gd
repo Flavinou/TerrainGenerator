@@ -105,9 +105,18 @@ signal changed(new_value)
 var rng: RandomNumberGenerator
 var noise: FastNoiseLite
 
-# Queue<MapThreadInfo<MapData>>
-var map_data_thread_info_queue: Queue
-var map_mutex: Mutex
+# Queue<ThreadOperation<MapData | MeshData>>
+var result_queue: Array = []
+
+var task_queue: Array = []
+
+
+var thread_pool: Array = []
+var max_threads: int = 2
+
+var lock: Mutex
+var semaphore: Semaphore
+var is_running: bool = true
 	
 func _init():
 	if rng == null:
@@ -117,17 +126,26 @@ func _init():
 		
 	noise.noise_type = FastNoiseLite.TYPE_PERLIN
 	
-	map_data_thread_info_queue = Queue.new(10)
-	map_mutex = Mutex.new()
+	lock = Mutex.new()
+	semaphore = Semaphore.new()
+	
+	for i in range(max_threads):
+		var worker_thread = Thread.new()
+		thread_pool.append(worker_thread)
+		worker_thread.start(thread_worker_callback)
 	
 	
 func _process(_delta):
-	if (map_data_thread_info_queue.size == 0):
-		return
-		
-	# Pop element from the queue and run its callback method
-	var map_thread_info = map_data_thread_info_queue.dequeue() as MapThreadInfo
-	map_thread_info.callback.call(map_thread_info.arg)
+	lock.lock()
+	if (result_queue.size() > 0):
+		# Pop element from the queue and run its callback method
+		for i in range(result_queue.size()):
+			lock.lock()
+			var result = result_queue.pop_front() as ThreadOperation
+			lock.unlock()
+			
+			result.callback.call(result.arg)
+	lock.unlock()
 	
 	
 func _get_tool_buttons() -> Array:
@@ -143,7 +161,15 @@ func _on_button_pressed():
 func _on_changed(_new_value):
 	draw_map_in_editor()
 	
-
+	
+func _exit_tree():
+	is_running = false
+	for i in range(max_threads):
+		semaphore.post()  # Unblock all threads gracefully
+	for thread in thread_pool:
+		thread.wait_to_finish()
+	
+	
 func draw_map_in_editor() -> void:
 	var display: TerrainDisplay = get_node("TerrainDisplay")
 	if display == null:
@@ -247,21 +273,23 @@ func generate_noise_map(_width: int, _height: int, _seed: int, _texture_scale: f
 
 # generate a mesh from a 2-dimensional height map
 func generate_terrain_mesh(_height_map: Array[Array], _height_multiplier: float, _height_curve: Curve, _level_of_detail: int, _width: int, _height: int) -> MeshData:
+	var height_curve: Curve = _height_curve.duplicate()
 	var top_left_x: float = (_width - 1) / -2.0
 	var top_left_z: float = (_height - 1) / 2.0
 	
 	var meshSimplificationIncrement: int = 1 if _level_of_detail == 0 else _level_of_detail * 2
+	@warning_ignore("integer_division")
 	var verticesPerLine: int = ( (_width - 1) / meshSimplificationIncrement ) + 1
 	
 	var mesh_data: MeshData = MeshData.new(verticesPerLine, verticesPerLine)
 	var vertex_index: int = 0
 	
-	if not _height_curve:
+	if not height_curve:
 		push_warning("No height curve set, raw points from height map will be used.")
 	
 	for x in range(0, _width, meshSimplificationIncrement):
 		for y in range(0, _height, meshSimplificationIncrement):
-			var y_axis_value: float = _height_curve.sample(_height_map[x][y]) if _height_curve else _height_map[x][y]
+			var y_axis_value: float = height_curve.sample(_height_map[x][y]) if height_curve else _height_map[x][y]
 			mesh_data.vertices[vertex_index] = Vector3(top_left_x + x, y_axis_value * _height_multiplier, top_left_z - y)
 			mesh_data.uvs[vertex_index] = Vector2(x / (_width as float), y / (_height as float))
 			
@@ -299,15 +327,48 @@ func texture_from_height_map(_height_map: Array[Array], _width: int, _height: in
 
 # Threading Utilities #
 
-func request_map_data(callback: Callable) -> void:
-	var thread: Thread = Thread.new()
-	thread.start(map_data_thread.bind(callback))
+func thread_worker_callback() -> void:
+	while is_running:
+		semaphore.wait()
+		lock.lock()
+		if task_queue.size() > 0:
+			var task = task_queue.pop_front() as Callable
+			task.call()
+		else:
+			lock.unlock()
+			continue
+		lock.unlock()
 	
 	
-func map_data_thread(callback: Callable) -> void:
+func request_map_data(completed_callback: Callable) -> void:
+	lock.lock()
+	task_queue.append(map_data_thread.bind(completed_callback))
+	lock.unlock()
+	semaphore.post()
+	
+	
+# Will be executed on another thread
+func map_data_thread(completed_callback: Callable) -> void:
 	var map_data: MapData = generate_map_data()
-	var map_thread_info: MapThreadInfo = MapThreadInfo.new(callback, map_data)
+	var map_task: ThreadOperation = ThreadOperation.new(completed_callback, map_data)
 	
-	map_mutex.lock()
-	map_data_thread_info_queue.enqueue(map_thread_info)
-	map_mutex.unlock()
+	lock.lock()
+	result_queue.append(map_task)
+	lock.unlock()
+	
+	
+func request_mesh_data(map_data: MapData, completed_callback: Callable) -> void:
+	lock.lock()
+	task_queue.append(mesh_data_thread.bind(map_data, completed_callback))
+	lock.unlock()
+	semaphore.post()
+	
+	
+# Will be executed on another thread
+func mesh_data_thread(map_data: MapData, completed_callback: Callable) -> void:
+	var mesh_data: MeshData = generate_terrain_mesh(map_data.height_map, height_multiplier, mesh_height_curve, level_of_detail, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE)
+	var mesh_task: ThreadOperation = ThreadOperation.new(completed_callback, mesh_data)
+	
+	lock.lock()
+	result_queue.append(mesh_task)
+	lock.unlock()
