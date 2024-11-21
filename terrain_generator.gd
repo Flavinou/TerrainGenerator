@@ -8,7 +8,7 @@ const FLOAT_MIN: float = -1.79769e308
 const INT_MAX: float = 9223372036854775807
 const INT_MIN: float = -9223372036854775808
 
-const MAP_CHUNK_SIZE: int = 241
+const MAP_CHUNK_SIZE: int = 239
 
 signal changed(new_value)
 
@@ -205,7 +205,7 @@ func draw_map_in_editor() -> void:
 			display.draw_texture(TerrainGenerator.texture_from_color_map(map_data.color_map, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE))
 		DrawMode.DrawMode.Mesh:
 			mesh_display.draw_mesh(
-				generate_terrain_mesh(map_data.height_map, height_multiplier, mesh_height_curve, editor_preview_lod, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE), 
+				generate_terrain_mesh(map_data.height_map, height_multiplier, mesh_height_curve, editor_preview_lod), 
 				TerrainGenerator.texture_from_color_map(map_data.color_map, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE)
 			)
 		DrawMode.DrawMode.FalloffMap:
@@ -215,7 +215,7 @@ func draw_map_in_editor() -> void:
 
 
 func generate_map_data(center: Vector2) -> MapData:
-	var noise_map: Array[Array] = generate_noise_map(MAP_CHUNK_SIZE, MAP_CHUNK_SIZE, random_seed, noise_scale, octaves, persistance, lacunarity, center + offset, normalize_mode)
+	var noise_map: Array[Array] = generate_noise_map(MAP_CHUNK_SIZE + 2, MAP_CHUNK_SIZE + 2, random_seed, noise_scale, octaves, persistance, lacunarity, center + offset, normalize_mode)
 	
 	# assign colors to each region
 	var color_map: Array[Color] = []
@@ -302,30 +302,60 @@ func generate_noise_map(_width: int, _height: int, _seed: int, _texture_scale: f
 
 
 # generate a mesh from a 2-dimensional height map
-func generate_terrain_mesh(_height_map: Array[Array], _height_multiplier: float, _height_curve: Curve, _level_of_detail: int, _width: int, _height: int) -> MeshData:
+func generate_terrain_mesh(_height_map: Array[Array], _height_multiplier: float, _height_curve: Curve, _level_of_detail: int) -> MeshData:
 	var height_curve: Curve = _height_curve.duplicate()
-	var top_left_x: float = (_width - 1) / -2.0
-	var top_left_z: float = (_height - 1) / 2.0
 	
-	var meshSimplificationIncrement: int = 1 if _level_of_detail == 0 else _level_of_detail * 2
+	var mesh_simplification_increment: int = 1 if _level_of_detail == 0 else _level_of_detail * 2
+	
+	var bordered_size: int = _height_map.size()
+	var mesh_size: int = bordered_size - 2 * mesh_simplification_increment
+	var mesh_size_unsimplified: int = bordered_size - 2
+	
+	var top_left_x: float = (mesh_size_unsimplified - 1) / -2.0
+	var top_left_z: float = (mesh_size_unsimplified - 1) / 2.0
+	
 	@warning_ignore("integer_division")
-	var verticesPerLine: int = ( (_width - 1) / meshSimplificationIncrement ) + 1
+	var vertices_per_line: int = (mesh_size - 1) / mesh_simplification_increment + 1
 	
-	var mesh_data: MeshData = MeshData.new(verticesPerLine, verticesPerLine)
-	var vertex_index: int = 0
+	var mesh_data: MeshData = MeshData.new(vertices_per_line)
+
+	var vertex_indices_map: Array[Array] = []
+	vertex_indices_map.resize(bordered_size)
+	var mesh_vertex_index: int = 0
+	var border_vertex_index: int = -1
+	
+	for y in range(0, bordered_size, mesh_simplification_increment):
+		for x in range(0, bordered_size, mesh_simplification_increment):
+			if vertex_indices_map[x].size() == 0:
+				vertex_indices_map[x].resize(bordered_size)
+			
+			var is_border_vertex: bool = y == 0 or y == bordered_size - 1 or x == 0 or x == bordered_size - 1
+			if is_border_vertex:
+				vertex_indices_map[x][y] = border_vertex_index
+				border_vertex_index -= 1
+			else:
+				vertex_indices_map[x][y] = mesh_vertex_index
+				mesh_vertex_index += 1
 	
 	if not height_curve:
 		push_warning("No height curve set, raw points from height map will be used.")
 	
-	for x in range(0, _width, meshSimplificationIncrement):
-		for y in range(0, _height, meshSimplificationIncrement):
-			var y_axis_value: float = height_curve.sample(_height_map[x][y]) if height_curve else _height_map[x][y]
-			mesh_data.vertices[vertex_index] = Vector3(top_left_x + x, y_axis_value * _height_multiplier, top_left_z - y)
-			mesh_data.uvs[vertex_index] = Vector2(x / (_width as float), y / (_height as float))
+	for y in range(0, bordered_size, mesh_simplification_increment):
+		for x in range(0, bordered_size, mesh_simplification_increment):
+			var vertex_index: int = vertex_indices_map[x][y]
+			var percent: Vector2 = Vector2((x - mesh_simplification_increment) / (mesh_size as float), (y - mesh_simplification_increment) / (mesh_size as float))
+			var height: float = ( height_curve.sample(_height_map[x][y]) if height_curve else _height_map[x][y] ) * _height_multiplier
+			var vertex_position: Vector3 = Vector3(top_left_x + percent.x * mesh_size_unsimplified, height, top_left_z - percent.y * mesh_size_unsimplified)
 			
-			if x < _width - 1 and y < _height - 1:
-				mesh_data.add_triangle(vertex_index, vertex_index + verticesPerLine + 1, vertex_index + verticesPerLine)
-				mesh_data.add_triangle(vertex_index + verticesPerLine + 1, vertex_index, vertex_index + 1)
+			mesh_data.add_vertex(vertex_position, percent, vertex_index)
+			
+			if x < bordered_size - 1 and y < bordered_size - 1:
+				var a: int = vertex_indices_map[x][y]
+				var b: int = vertex_indices_map[x + mesh_simplification_increment][y]
+				var c: int = vertex_indices_map[x][y + mesh_simplification_increment]
+				var d: int = vertex_indices_map[x + mesh_simplification_increment][y + mesh_simplification_increment]
+				mesh_data.add_triangle(b, c, d) # Godot wants it counter-clockwise apparently
+				mesh_data.add_triangle(c, b, a)
 
 			vertex_index += 1
 			
@@ -419,7 +449,7 @@ func request_mesh_data(map_data: MapData, lod: int, completed_callback: Callable
 	
 # Will be executed on another thread
 func mesh_data_thread(map_data: MapData, lod: int, completed_callback: Callable) -> void:
-	var mesh_data: MeshData = generate_terrain_mesh(map_data.height_map, height_multiplier, mesh_height_curve, lod, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE)
+	var mesh_data: MeshData = generate_terrain_mesh(map_data.height_map, height_multiplier, mesh_height_curve, lod)
 	var mesh_task: ThreadOperation = ThreadOperation.new(completed_callback, mesh_data)
 	
 	lock.lock()
