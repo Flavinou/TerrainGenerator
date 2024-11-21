@@ -102,6 +102,7 @@ signal changed(new_value)
 		offset = value
 		
 @export var auto_update: bool = false
+@export var use_falloff: bool = false
 
 @export var regions: Array[TerrainType] = []:
 	get:
@@ -126,6 +127,9 @@ var max_chunks_per_frame: int = 2
 var lock: Mutex
 var semaphore: Semaphore
 var is_running: bool = true
+
+# State
+var falloff_map: Array[Array] # 2d float array
 	
 func _init():
 	if rng == null:
@@ -134,6 +138,8 @@ func _init():
 		noise = FastNoiseLite.new()
 		
 	noise.noise_type = FastNoiseLite.TYPE_PERLIN
+	
+	falloff_map = TerrainGenerator.generate_falloff_map(MAP_CHUNK_SIZE)
 	
 	
 func _ready():
@@ -194,14 +200,16 @@ func draw_map_in_editor() -> void:
 	
 	match draw_mode:
 		DrawMode.DrawMode.NoiseMap:
-			display.draw_texture(texture_from_height_map(map_data.height_map, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE))
+			display.draw_texture(TerrainGenerator.texture_from_height_map(map_data.height_map, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE))
 		DrawMode.DrawMode.ColorMap:
-			display.draw_texture(texture_from_color_map(map_data.color_map, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE))
+			display.draw_texture(TerrainGenerator.texture_from_color_map(map_data.color_map, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE))
 		DrawMode.DrawMode.Mesh:
 			mesh_display.draw_mesh(
 				generate_terrain_mesh(map_data.height_map, height_multiplier, mesh_height_curve, editor_preview_lod, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE), 
-				texture_from_color_map(map_data.color_map, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE)
+				TerrainGenerator.texture_from_color_map(map_data.color_map, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE)
 			)
+		DrawMode.DrawMode.FalloffMap:
+			display.draw_texture(TerrainGenerator.texture_from_height_map(TerrainGenerator.generate_falloff_map(MAP_CHUNK_SIZE), MAP_CHUNK_SIZE, MAP_CHUNK_SIZE))
 		_: 
 			return # ignore other possibilities at the moment
 
@@ -214,6 +222,8 @@ func generate_map_data(center: Vector2) -> MapData:
 	color_map.resize(MAP_CHUNK_SIZE * MAP_CHUNK_SIZE)
 	for x in range(MAP_CHUNK_SIZE):
 		for y in range(MAP_CHUNK_SIZE):
+			if use_falloff:
+				noise_map[x][y] = clamp(noise_map[x][y] - falloff_map[x][y], 0, 1)
 			var current_height: float = noise_map[x][y]
 			for i in range(regions.size()):
 				if current_height >= regions[i].height:
@@ -322,9 +332,32 @@ func generate_terrain_mesh(_height_map: Array[Array], _height_multiplier: float,
 	return mesh_data
 
 
+static func generate_falloff_map(_size: int) -> Array[Array]:
+	var map: Array[Array] = []
+	
+	for i in range(_size):
+		map.append([])
+		
+		for j in range(_size):
+			map[i].append(0)
+			var x: float = i / float(_size) * 2 - 1
+			var y: float = j / float(_size) * 2 - 1
+			
+			var value: float = max(abs(x), abs(y))
+			map[i][j] = evaluate(value)
+			
+	return map
+	
+
+static func evaluate(_value: float) -> float:
+	var a: float = 3
+	var b: float = 2.2
+	
+	return pow(_value, a) / (pow(_value, a) + pow((b - b * _value), a))
+
 # Utilities #
 
-func texture_from_color_map(_color_map: Array[Color], _width: int, _height: int) -> ImageTexture:
+static func texture_from_color_map(_color_map: Array[Color], _width: int, _height: int) -> ImageTexture:
 	var image: Image = Image.create(_width, _height, false, Image.FORMAT_RGBA8)
 	
 	for x in range(_width):
@@ -335,7 +368,7 @@ func texture_from_color_map(_color_map: Array[Color], _width: int, _height: int)
 	return texture
 	
 	
-func texture_from_height_map(_height_map: Array[Array], _width: int, _height: int) -> ImageTexture:
+static func texture_from_height_map(_height_map: Array[Array], _width: int, _height: int) -> ImageTexture:
 	var color_map: Array[Color] = []
 	color_map.resize(_width * _height)
 	for x in range(_width):
