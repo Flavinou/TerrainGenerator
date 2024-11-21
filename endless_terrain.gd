@@ -17,7 +17,6 @@ var chunk_size: int
 var chunks_visible_in_view_dst: int
 
 var terrain_chunk_dictionary: Dictionary = {}
-var last_visible_terrain_chunks: Array[TerrainChunk] = []
 
 func _ready():
 	max_view_distance = detail_levels[-1].visible_distance_threshold
@@ -45,9 +44,9 @@ func update_visible_chunks() -> void:
 		push_warning('No material set for the terrain chunks, drawing will not occur.')
 		return
 	
-	for i in range(last_visible_terrain_chunks.size()):
-		last_visible_terrain_chunks[i].toggle_visible(false)
-	last_visible_terrain_chunks.clear()
+	for i in range(Shared.last_visible_terrain_chunks.size()):
+		Shared.last_visible_terrain_chunks[i].toggle_visible(false)
+	Shared.last_visible_terrain_chunks.clear()
 	
 	var current_chunk_coord_x = roundi(viewer_position.x / chunk_size)
 	var current_chunk_coord_y = roundi(viewer_position.y / chunk_size)
@@ -63,9 +62,6 @@ func update_visible_chunks() -> void:
 					break
 					
 				terrain_chunk.update(viewer_position, max_view_distance)
-				
-				if terrain_chunk.visible:
-					last_visible_terrain_chunks.append(terrain_chunk)
 			else:
 				terrain_chunk_dictionary[viewed_chunk_coord] = TerrainChunk.new(viewed_chunk_coord, chunk_size, detail_levels, self, material, max_view_distance)
 

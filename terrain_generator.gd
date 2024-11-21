@@ -5,18 +5,28 @@ class_name TerrainGenerator
 
 const FLOAT_MAX: float = 1.79769e308
 const FLOAT_MIN: float = -1.79769e308
+const INT_MAX: float = 9223372036854775807
+const INT_MIN: float = -9223372036854775808
 
 const MAP_CHUNK_SIZE: int = 241
 
 signal changed(new_value)
 
-@export var draw_mode: DrawMode.DrawMode = DrawMode.DrawMode.ColorMap:
+@export var draw_mode: DrawMode.DrawMode:
 	get:
 		return draw_mode
 	set(value):
 		if (auto_update):
 			changed.emit(value)
 		draw_mode = value
+		
+@export var normalize_mode: Shared.NormalizeMode:
+	get:
+		return normalize_mode
+	set(value):
+		if (auto_update):
+			changed.emit(value)
+		normalize_mode = value
 
 @export_category("Noise Settings")
 @export_range(0, 6) var editor_preview_lod: int = 0:
@@ -197,7 +207,7 @@ func draw_map_in_editor() -> void:
 
 
 func generate_map_data(center: Vector2) -> MapData:
-	var noise_map: Array[Array] = generate_noise_map(MAP_CHUNK_SIZE, MAP_CHUNK_SIZE, random_seed, noise_scale, octaves, persistance, lacunarity, center + offset)
+	var noise_map: Array[Array] = generate_noise_map(MAP_CHUNK_SIZE, MAP_CHUNK_SIZE, random_seed, noise_scale, octaves, persistance, lacunarity, center + offset, normalize_mode)
 	
 	# assign colors to each region
 	var color_map: Array[Color] = []
@@ -206,31 +216,39 @@ func generate_map_data(center: Vector2) -> MapData:
 		for y in range(MAP_CHUNK_SIZE):
 			var current_height: float = noise_map[x][y]
 			for i in range(regions.size()):
-				if current_height <= regions[i].height:
+				if current_height >= regions[i].height:
 					color_map[y * MAP_CHUNK_SIZE + x] = regions[i].color
+				else:
 					break
 	
 	return MapData.new(noise_map, color_map)
 
 
 # generate a 2-dimensional array of random values for the specified resolution and scale
-func generate_noise_map(_width: int, _height: int, _seed: int, _texture_scale: float, _octaves: int, _persistance: float, _lacunarity: float, _offset: Vector2) -> Array[Array]:
+func generate_noise_map(_width: int, _height: int, _seed: int, _texture_scale: float, _octaves: int, _persistance: float, _lacunarity: float, _offset: Vector2, _normalize_mode: Shared.NormalizeMode) -> Array[Array]:
 	rng.seed = _seed
 	
 	var noise_map: Array[Array] = []
-	
 	var octaveOffsets: PackedVector2Array = []
 	octaveOffsets.resize(_octaves)
+	
+	var max_possible_noise_height: float = 0
+	var amplitude: float = 1
+	var frequency: float = 1
+	
 	for i in range(_octaves):
-		var offsetX: float = rng.randi_range(-100000, 100000) + offset.x
-		var offsetY: float = rng.randi_range(-100000, 100000) + offset.y
+		var offsetX: float = rng.randi_range(-100000, 100000) + _offset.x
+		var offsetY: float = rng.randi_range(-100000, 100000) - _offset.y
 		octaveOffsets[i] = Vector2(offsetX, offsetY)
+		
+		max_possible_noise_height += amplitude
+		amplitude *= _persistance
 		
 	if _texture_scale <= 0:
 		_texture_scale = 0.0001
 		
-	var max_noise_height: float = FLOAT_MIN
-	var min_noise_height: float = FLOAT_MAX
+	var max_local_noise_height: float = FLOAT_MIN
+	var min_local_noise_height: float = FLOAT_MAX
 	
 	var half_width: float = _width / 2.0
 	var half_height: float = _height / 2.0
@@ -241,13 +259,13 @@ func generate_noise_map(_width: int, _height: int, _seed: int, _texture_scale: f
 		for y in range(_height):
 			noise_map[x].append(0)
 			
-			var amplitude: float = 1
-			var frequency: float = 1
+			amplitude = 1
+			frequency = 1
 			var noise_height: float = 0
 			
 			for i in range(_octaves):
-				var sample_x: float = (x - half_width) / _texture_scale * frequency + octaveOffsets[i].x
-				var sample_y: float = (y - half_height) / _texture_scale * frequency + octaveOffsets[i].y
+				var sample_x: float = (x - half_width + octaveOffsets[i].x) / _texture_scale * frequency
+				var sample_y: float = (y - half_height + octaveOffsets[i].y) / _texture_scale * frequency
 				
 				var noise_value: float = noise.get_noise_2d(sample_x, sample_y) * 2 - 1
 				noise_height += noise_value * amplitude
@@ -255,17 +273,20 @@ func generate_noise_map(_width: int, _height: int, _seed: int, _texture_scale: f
 				amplitude *= _persistance
 				frequency *= _lacunarity
 			
-			if noise_height > max_noise_height:
-				max_noise_height = noise_height
-			elif noise_height < min_noise_height:
-				min_noise_height = noise_height
+			if noise_height > max_local_noise_height:
+				max_local_noise_height = noise_height
+			elif noise_height < min_local_noise_height:
+				min_local_noise_height = noise_height
 			
 			noise_map[x][y] = noise_height
 				
 	for x in range(_width):
 		for y in range(_height):
-			# normalize noise map
-			noise_map[x][y] = inverse_lerp(min_noise_height, max_noise_height, noise_map[x][y])
+			if _normalize_mode == Shared.NormalizeMode.Local:
+				noise_map[x][y] = inverse_lerp(min_local_noise_height, max_local_noise_height, noise_map[x][y])
+			else:
+				var normalized_height: float = (noise_map[x][y] + 1) / (max_possible_noise_height / 1.25)
+				noise_map[x][y] = clamp(normalized_height, 0, INT_MAX)
 			
 	return noise_map
 

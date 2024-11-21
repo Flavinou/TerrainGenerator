@@ -31,7 +31,8 @@ func _ready():
 	for i in range(detail_levels.size()):
 		lod_meshes[i] = LODMesh.new(terrain_generator, detail_levels[i].lod, update.bind(viewer_position, max_view_distance))
 		
-	mesh_instance.global_position = world_position
+	mesh_instance.global_position = world_position * Shared.SCALE
+	mesh_instance.scale_object_local(Vector3.ONE * Shared.SCALE)
 		
 	terrain_generator.request_map_data(chunk_position, on_map_data_received)
 	
@@ -95,6 +96,8 @@ func update(_viewer_position: Vector2, _max_view_distance: float):
 				mesh_instance.mesh = lod_mesh.mesh
 			elif not lod_mesh.has_requested_mesh:
 				lod_mesh.request_mesh(map_data)
+				
+		Shared.last_visible_terrain_chunks.append(self)
 	
 	toggle_visible(should_be_visible)
 	
