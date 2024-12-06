@@ -354,10 +354,12 @@ func generate_terrain_mesh(_height_map: Array[Array], _height_multiplier: float,
 				var b: int = vertex_indices_map[x + mesh_simplification_increment][y]
 				var c: int = vertex_indices_map[x][y + mesh_simplification_increment]
 				var d: int = vertex_indices_map[x + mesh_simplification_increment][y + mesh_simplification_increment]
-				mesh_data.add_triangle(b, c, d) # Godot wants it counter-clockwise apparently
+				mesh_data.add_triangle(b, c, d) # Godot (Vulkan API) wants it counter-clockwise apparently
 				mesh_data.add_triangle(c, b, a)
 
 			vertex_index += 1
+			
+	mesh_data.bake_normals()
 			
 	return mesh_data
 

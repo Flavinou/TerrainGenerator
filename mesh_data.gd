@@ -5,6 +5,7 @@ class_name MeshData
 var vertices: PackedVector3Array
 var triangles: PackedInt32Array
 var uvs: PackedVector2Array
+var baked_normals: PackedVector3Array
 
 var border_vertices: PackedVector3Array
 var border_triangles: PackedInt32Array
@@ -61,7 +62,7 @@ func create_mesh() -> ArrayMesh:
 	surface_array[Mesh.ARRAY_VERTEX] = vertices
 	surface_array[Mesh.ARRAY_TEX_UV] = uvs
 	surface_array[Mesh.ARRAY_INDEX] = triangles
-	surface_array[Mesh.ARRAY_NORMAL] = calculate_vertex_normals()
+	surface_array[Mesh.ARRAY_NORMAL] = baked_normals
 
 	# Create the Mesh.
 	arr_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, surface_array)
@@ -113,3 +114,6 @@ func surface_normal_from_indices(_ia: int, _ib: int, _ic: int) -> Vector3:
 	var side_a_c: Vector3 = point_c - point_a
 	return side_a_b.cross(side_a_c).normalized()
 	
+
+func bake_normals():
+	baked_normals = calculate_vertex_normals()

@@ -4,7 +4,9 @@ class_name TerrainChunk
 
 @onready var terrain_generator = get_node("/root/TerrainGenerator")
 
-@export var mesh_instance: MeshInstance3D
+var mesh_instance: MeshInstance3D
+var physics_body: StaticBody3D
+var collision_shape: CollisionShape3D
 var size: int
 var chunk_position: Vector2
 var bounds: Rect2
@@ -14,6 +16,7 @@ var world_position: Vector3
 
 var detail_levels: Array[LODInfo] = []
 var lod_meshes: Array[LODMesh] = []
+var collision_lod_mesh: LODMesh
 
 var map_data: MapData
 var map_data_received: bool = false
@@ -30,6 +33,8 @@ func _ready():
 		
 	for i in range(detail_levels.size()):
 		lod_meshes[i] = LODMesh.new(terrain_generator, detail_levels[i].lod, update.bind(viewer_position, max_view_distance))
+		if detail_levels[i].use_for_collider:
+			collision_lod_mesh = lod_meshes[i]
 		
 	mesh_instance.global_position = world_position * Shared.SCALE
 	mesh_instance.scale_object_local(Vector3.ONE * Shared.SCALE)
@@ -47,7 +52,13 @@ func _init(_coordinates: Vector2, _size: int, _detail_levels: Array[LODInfo], _p
 	lod_meshes.resize(detail_levels.size())
 	
 	mesh_instance = MeshInstance3D.new()
+	physics_body = StaticBody3D.new()
+	collision_shape = CollisionShape3D.new()
 	mesh_instance.material_override = _material
+	
+	physics_body.add_child.call_deferred(collision_shape)
+	mesh_instance.add_child.call_deferred(physics_body)
+	
 	add_child.call_deferred(mesh_instance)
 	_parent.add_child.call_deferred(self)
 	
@@ -96,6 +107,11 @@ func update(_viewer_position: Vector2, _max_view_distance: float):
 				mesh_instance.mesh = lod_mesh.mesh
 			elif not lod_mesh.has_requested_mesh:
 				lod_mesh.request_mesh(map_data)
+				
+		if lod_index == 0 and collision_lod_mesh.has_mesh:
+			collision_shape.shape = collision_lod_mesh.mesh.create_trimesh_shape()
+		elif not collision_lod_mesh.has_requested_mesh:
+			collision_lod_mesh.request_mesh(map_data)
 				
 		Shared.last_visible_terrain_chunks.append(self)
 	

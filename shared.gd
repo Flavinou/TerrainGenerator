@@ -1,10 +1,10 @@
 extends Node
 
-const SCALE: float = 5
+const SCALE: float = 2
 
 enum NormalizeMode { Local = 0, Global = 1 }
 
-@onready var viewer: Node = get_node("/root/TerrainGenerator/Viewer")
+@onready var viewer: Node = get_node("/root/TerrainGenerator/Player")
 
 var viewer_position: Vector2
 var last_visible_terrain_chunks: Array[TerrainChunk] = []

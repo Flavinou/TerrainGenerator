@@ -9,7 +9,6 @@ var max_view_distance: float = 450
 var viewer_position: Vector2
 var old_viewer_position: Vector2
 
-@export var viewer: Node3D
 @export var material: Material
 @export var detail_levels: Array[LODInfo] = []
 
@@ -24,10 +23,6 @@ func _ready():
 	chunks_visible_in_view_dst = roundi(max_view_distance / chunk_size)
 	
 	update_visible_chunks()
-	
-#	if OS.is_debug_build():
-#		RenderingServer.set_debug_generate_wireframes(true)
-#		get_viewport().debug_draw = Viewport.DEBUG_DRAW_WIREFRAME
 		
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
