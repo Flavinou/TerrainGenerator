@@ -2,15 +2,17 @@ extends Node3D
 
 class_name EndlessTerrain
 
+@onready var terrain_generator = get_node("/root/TerrainGenerator")
+
+@export var material: Material
+@export var detail_levels: Array[LODInfo] = []
+
 const VIEWER_MOVE_THRESHOLD_CHUNK_UPDATE: float = 25
 const SQR_VIEWER_MOVE_THRESHOLD_CHUNK_UPDATE: float = VIEWER_MOVE_THRESHOLD_CHUNK_UPDATE * VIEWER_MOVE_THRESHOLD_CHUNK_UPDATE
 
 var max_view_distance: float = 450
 var viewer_position: Vector2
 var old_viewer_position: Vector2
-
-@export var material: Material
-@export var detail_levels: Array[LODInfo] = []
 
 var chunk_size: int
 var chunks_visible_in_view_dst: int
@@ -19,7 +21,7 @@ var terrain_chunk_dictionary: Dictionary = {}
 
 func _ready():
 	max_view_distance = detail_levels[-1].visible_distance_threshold
-	chunk_size = TerrainGenerator.MAP_CHUNK_SIZE - 1
+	chunk_size = terrain_generator.map_chunk_size - 1
 	chunks_visible_in_view_dst = roundi(max_view_distance / chunk_size)
 	
 	update_visible_chunks()

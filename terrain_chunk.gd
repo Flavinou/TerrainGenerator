@@ -73,7 +73,7 @@ func on_map_data_received(_map_data: MapData) -> void:
 	map_data = _map_data
 	map_data_received = true
 	
-	var texture: ImageTexture = TerrainGenerator.texture_from_color_map(map_data.color_map, TerrainGenerator.MAP_CHUNK_SIZE, TerrainGenerator.MAP_CHUNK_SIZE)
+	var texture: ImageTexture = TerrainGenerator.texture_from_color_map(map_data.color_map, terrain_generator.map_chunk_size, terrain_generator.map_chunk_size)
 	var material: StandardMaterial3D = StandardMaterial3D.new()
 	material.albedo_texture = texture
 	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST

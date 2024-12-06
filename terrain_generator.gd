@@ -8,7 +8,9 @@ const FLOAT_MIN: float = -1.79769e308
 const INT_MAX: float = 9223372036854775807
 const INT_MIN: float = -9223372036854775808
 
-const MAP_CHUNK_SIZE: int = 239
+var map_chunk_size: int:
+	get:
+		return 95 if use_flat_shading else 239
 
 signal changed(new_value)
 
@@ -103,6 +105,7 @@ signal changed(new_value)
 		
 @export var auto_update: bool = false
 @export var use_falloff: bool = false
+@export var use_flat_shading: bool = false
 
 @export var regions: Array[TerrainType] = []:
 	get:
@@ -139,7 +142,7 @@ func _init():
 		
 	noise.noise_type = FastNoiseLite.TYPE_PERLIN
 	
-	falloff_map = TerrainGenerator.generate_falloff_map(MAP_CHUNK_SIZE)
+	falloff_map = TerrainGenerator.generate_falloff_map(map_chunk_size)
 	
 	
 func _ready():
@@ -200,34 +203,34 @@ func draw_map_in_editor() -> void:
 	
 	match draw_mode:
 		DrawMode.DrawMode.NoiseMap:
-			display.draw_texture(TerrainGenerator.texture_from_height_map(map_data.height_map, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE))
+			display.draw_texture(TerrainGenerator.texture_from_height_map(map_data.height_map, map_chunk_size, map_chunk_size))
 		DrawMode.DrawMode.ColorMap:
-			display.draw_texture(TerrainGenerator.texture_from_color_map(map_data.color_map, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE))
+			display.draw_texture(TerrainGenerator.texture_from_color_map(map_data.color_map, map_chunk_size, map_chunk_size))
 		DrawMode.DrawMode.Mesh:
 			mesh_display.draw_mesh(
-				generate_terrain_mesh(map_data.height_map, height_multiplier, mesh_height_curve, editor_preview_lod), 
-				TerrainGenerator.texture_from_color_map(map_data.color_map, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE)
+				generate_terrain_mesh(map_data.height_map, height_multiplier, mesh_height_curve, editor_preview_lod, use_flat_shading), 
+				TerrainGenerator.texture_from_color_map(map_data.color_map, map_chunk_size, map_chunk_size)
 			)
 		DrawMode.DrawMode.FalloffMap:
-			display.draw_texture(TerrainGenerator.texture_from_height_map(TerrainGenerator.generate_falloff_map(MAP_CHUNK_SIZE), MAP_CHUNK_SIZE, MAP_CHUNK_SIZE))
+			display.draw_texture(TerrainGenerator.texture_from_height_map(TerrainGenerator.generate_falloff_map(map_chunk_size), map_chunk_size, map_chunk_size))
 		_: 
 			return # ignore other possibilities at the moment
 
 
 func generate_map_data(center: Vector2) -> MapData:
-	var noise_map: Array[Array] = generate_noise_map(MAP_CHUNK_SIZE + 2, MAP_CHUNK_SIZE + 2, random_seed, noise_scale, octaves, persistance, lacunarity, center + offset, normalize_mode)
+	var noise_map: Array[Array] = generate_noise_map(map_chunk_size + 2, map_chunk_size + 2, random_seed, noise_scale, octaves, persistance, lacunarity, center + offset, normalize_mode)
 	
 	# assign colors to each region
 	var color_map: Array[Color] = []
-	color_map.resize(MAP_CHUNK_SIZE * MAP_CHUNK_SIZE)
-	for x in range(MAP_CHUNK_SIZE):
-		for y in range(MAP_CHUNK_SIZE):
+	color_map.resize(map_chunk_size * map_chunk_size)
+	for x in range(map_chunk_size):
+		for y in range(map_chunk_size):
 			if use_falloff:
 				noise_map[x][y] = clamp(noise_map[x][y] - falloff_map[x][y], 0, 1)
 			var current_height: float = noise_map[x][y]
 			for i in range(regions.size()):
 				if current_height >= regions[i].height:
-					color_map[y * MAP_CHUNK_SIZE + x] = regions[i].color
+					color_map[y * map_chunk_size + x] = regions[i].color
 				else:
 					break
 	
@@ -302,7 +305,7 @@ func generate_noise_map(_width: int, _height: int, _seed: int, _texture_scale: f
 
 
 # generate a mesh from a 2-dimensional height map
-func generate_terrain_mesh(_height_map: Array[Array], _height_multiplier: float, _height_curve: Curve, _level_of_detail: int) -> MeshData:
+func generate_terrain_mesh(_height_map: Array[Array], _height_multiplier: float, _height_curve: Curve, _level_of_detail: int, _use_flat_shading: bool) -> MeshData:
 	var height_curve: Curve = _height_curve.duplicate()
 	
 	var mesh_simplification_increment: int = 1 if _level_of_detail == 0 else _level_of_detail * 2
@@ -317,7 +320,7 @@ func generate_terrain_mesh(_height_map: Array[Array], _height_multiplier: float,
 	@warning_ignore("integer_division")
 	var vertices_per_line: int = (mesh_size - 1) / mesh_simplification_increment + 1
 	
-	var mesh_data: MeshData = MeshData.new(vertices_per_line)
+	var mesh_data: MeshData = MeshData.new(vertices_per_line, _use_flat_shading)
 
 	var vertex_indices_map: Array[Array] = []
 	vertex_indices_map.resize(bordered_size)
@@ -359,7 +362,7 @@ func generate_terrain_mesh(_height_map: Array[Array], _height_multiplier: float,
 
 			vertex_index += 1
 			
-	mesh_data.bake_normals()
+	mesh_data.process_mesh()
 			
 	return mesh_data
 
@@ -451,7 +454,7 @@ func request_mesh_data(map_data: MapData, lod: int, completed_callback: Callable
 	
 # Will be executed on another thread
 func mesh_data_thread(map_data: MapData, lod: int, completed_callback: Callable) -> void:
-	var mesh_data: MeshData = generate_terrain_mesh(map_data.height_map, height_multiplier, mesh_height_curve, lod)
+	var mesh_data: MeshData = generate_terrain_mesh(map_data.height_map, height_multiplier, mesh_height_curve, lod, use_flat_shading)
 	var mesh_task: ThreadOperation = ThreadOperation.new(completed_callback, mesh_data)
 	
 	lock.lock()

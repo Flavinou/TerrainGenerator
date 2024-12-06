@@ -13,9 +13,15 @@ var border_triangles: PackedInt32Array
 var triangle_index: int
 var border_triangle_index: int
 
-func _init(_vertices_per_line: int):
+var surface_tool: SurfaceTool
+var use_flat_shading: bool
+
+func _init(_vertices_per_line: int, _use_flat_shading: bool):
+	use_flat_shading = _use_flat_shading
 	triangle_index = 0
 	border_triangle_index = 0
+	
+	surface_tool = SurfaceTool.new()
 	
 	vertices = PackedVector3Array()
 	vertices.resize(_vertices_per_line * _vertices_per_line)
@@ -60,13 +66,29 @@ func create_mesh() -> ArrayMesh:
 	var surface_array = []
 	surface_array.resize(Mesh.ARRAY_MAX)
 	surface_array[Mesh.ARRAY_VERTEX] = vertices
-	surface_array[Mesh.ARRAY_TEX_UV] = uvs
 	surface_array[Mesh.ARRAY_INDEX] = triangles
-	surface_array[Mesh.ARRAY_NORMAL] = baked_normals
-
+	surface_array[Mesh.ARRAY_TEX_UV] = uvs
+	
+	# Re-calculate normals if we want to use flat shading, otherwise use the pre-baked ones
+	surface_array[Mesh.ARRAY_NORMAL] = calculate_vertex_normals() if use_flat_shading else baked_normals
+	
 	# Create the Mesh.
 	arr_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, surface_array)
+		
+#	if use_flat_shading:
+##		surface_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+#		surface_tool.create_from(arr_mesh, arr_mesh)
+#		surface_tool.generate_normals()
+#		surface_tool.commit(arr_mesh)
+	
 	return arr_mesh
+	
+	
+func process_mesh() -> void:
+	if use_flat_shading:
+		flat_shading()
+	else:
+		bake_normals()
 	
 
 func calculate_vertex_normals() -> PackedVector3Array:
@@ -105,6 +127,7 @@ func calculate_vertex_normals() -> PackedVector3Array:
 	
 	return vertex_normals
 	
+	
 func surface_normal_from_indices(_ia: int, _ib: int, _ic: int) -> Vector3:
 	var point_a: Vector3 = border_vertices[-_ia - 1] if _ia < 0 else vertices[_ia]
 	var point_b: Vector3 = border_vertices[-_ib - 1] if _ib < 0 else vertices[_ib]
@@ -115,5 +138,21 @@ func surface_normal_from_indices(_ia: int, _ib: int, _ic: int) -> Vector3:
 	return side_a_b.cross(side_a_c).normalized()
 	
 
-func bake_normals():
+func bake_normals() -> void:
 	baked_normals = calculate_vertex_normals()
+
+
+func flat_shading() -> void:
+	var triangles_size = triangles.size()
+	var flat_shaded_vertices: PackedVector3Array = []
+	var flat_shaded_uvs: PackedVector2Array = []
+	flat_shaded_vertices.resize(triangles_size)
+	flat_shaded_uvs.resize(triangles_size)
+	
+	for i in range(triangles_size):
+		flat_shaded_vertices[i] = vertices[triangles[i]]
+		flat_shaded_uvs[i] = uvs[triangles[i]]
+		triangles[i] = i
+		
+	vertices = flat_shaded_vertices
+	uvs = flat_shaded_uvs
