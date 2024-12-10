@@ -36,8 +36,8 @@ func _ready():
 		if detail_levels[i].use_for_collider:
 			collision_lod_mesh = lod_meshes[i]
 		
-	mesh_instance.global_position = world_position * Shared.SCALE
-	mesh_instance.scale_object_local(Vector3.ONE * Shared.SCALE)
+	mesh_instance.global_position = world_position * terrain_generator.terrain_data.uniform_scale
+	mesh_instance.scale_object_local(Vector3.ONE * terrain_generator.terrain_data.uniform_scale)
 		
 	terrain_generator.request_map_data(chunk_position, on_map_data_received)
 	
@@ -72,12 +72,6 @@ func _process(_delta):
 func on_map_data_received(_map_data: MapData) -> void:
 	map_data = _map_data
 	map_data_received = true
-	
-	var texture: ImageTexture = TerrainGenerator.texture_from_color_map(map_data.color_map, terrain_generator.map_chunk_size, terrain_generator.map_chunk_size)
-	var material: StandardMaterial3D = StandardMaterial3D.new()
-	material.albedo_texture = texture
-	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-	mesh_instance.material_override = material
 	
 	update.call_deferred(viewer_position, max_view_distance)
 	

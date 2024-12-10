@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="NoiseData" load_steps=2 format=3 uid="uid://cb71rtglhctt1"]
+
+[ext_resource type="Script" path="res://data/noise_data.gd" id="1_3fx18"]
+
+[resource]
+script = ExtResource("1_3fx18")
+normalize_mode = 1
+noise_scale = 0.55
+octaves = 3
+persistance = 0.159
+lacunarity = 1.54
+random_seed = 0
+offset = Vector2(-42.9, 0)
+auto_update = true

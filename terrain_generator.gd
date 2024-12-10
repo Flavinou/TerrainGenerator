@@ -3,32 +3,28 @@ extends Node3D
 
 class_name TerrainGenerator
 
-const FLOAT_MAX: float = 1.79769e308
-const FLOAT_MIN: float = -1.79769e308
-const INT_MAX: float = 9223372036854775807
-const INT_MIN: float = -9223372036854775808
+@onready var terrain_display: TerrainDisplay = get_node("TerrainDisplay")
+@onready var mesh_display: MeshDisplay = get_node("MeshDisplay")
+
+@export var terrain_data: TerrainData
+@export var noise_data: NoiseData
+@export var texture_data: TextureData
+
+@export var terrain_material: ShaderMaterial
+
+signal changed()
 
 var map_chunk_size: int:
 	get:
-		return 95 if use_flat_shading else 239
-
-signal changed(new_value)
-
+		return 95 if terrain_data != null and terrain_data.use_flat_shading else 239
+		
 @export var draw_mode: DrawMode.DrawMode:
 	get:
 		return draw_mode
 	set(value):
 		if (auto_update):
-			changed.emit(value)
+			changed.emit()
 		draw_mode = value
-		
-@export var normalize_mode: Shared.NormalizeMode:
-	get:
-		return normalize_mode
-	set(value):
-		if (auto_update):
-			changed.emit(value)
-		normalize_mode = value
 
 @export_category("Noise Settings")
 @export_range(0, 6) var editor_preview_lod: int = 0:
@@ -36,88 +32,14 @@ signal changed(new_value)
 		return editor_preview_lod
 	set(value):
 		if (auto_update):
-			changed.emit(value)
+			changed.emit()
 		editor_preview_lod = value
-
-@export_range(1, 50) var height_multiplier: float = 1:
-	get:
-		return height_multiplier
-	set(value):
-		if (auto_update):
-			changed.emit(value)
-		height_multiplier = value
-		
-@export var mesh_height_curve: Curve:
-	get:
-		return mesh_height_curve
-	set(value):
-		if (auto_update):
-			changed.emit(value)
-		mesh_height_curve = value
-		
-@export_range(0.001, 30) var noise_scale: float = 0.3:
-	get:
-		return noise_scale
-	set(value):
-		if (auto_update):
-			changed.emit(value)
-		noise_scale = value
-
-@export_range(0, 10) var octaves: int = 4:
-	get:
-		return octaves
-	set(value):
-		if (auto_update):
-			changed.emit(value)
-		octaves = value
-		
-@export_range(0, 1) var persistance: float = 0.5:
-	get:
-		return persistance
-	set(value):
-		if (auto_update):
-			changed.emit(value)
-		persistance = value
-		
-@export_range(1, 5) var lacunarity: float = 2:
-	get:
-		return lacunarity
-	set(value):
-		if (auto_update):
-			changed.emit(value)
-		lacunarity = value
-		
-@export var random_seed: int:
-	get:
-		return random_seed
-	set(value):
-		if (auto_update):
-			changed.emit(value)
-		random_seed = value
-		
-@export var offset: Vector2:
-	get:
-		return offset
-	set(value):
-		if (auto_update):
-			changed.emit(value)
-		offset = value
 		
 @export var auto_update: bool = false
-@export var use_falloff: bool = false
-@export var use_flat_shading: bool = false
-
-@export var regions: Array[TerrainType] = []:
-	get:
-		return regions
-	set(value):
-		if (auto_update):
-			changed.emit(value)
-		regions = value
 
 # Internals
-var rng: RandomNumberGenerator
-var noise: FastNoiseLite
+var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+var noise: FastNoiseLite = FastNoiseLite.new()
 
 # Queue<ThreadOperation<MapData | MeshData>>
 var result_queue: Array = []
@@ -135,17 +57,11 @@ var is_running: bool = true
 var falloff_map: Array[Array] # 2d float array
 	
 func _init():
-	if rng == null:
-		rng = RandomNumberGenerator.new()
-	if noise == null:
-		noise = FastNoiseLite.new()
-		
 	noise.noise_type = FastNoiseLite.TYPE_PERLIN
-	
-	falloff_map = TerrainGenerator.generate_falloff_map(map_chunk_size)
 	
 	
 func _ready():
+	# init main worker thread
 	lock = Mutex.new()
 	semaphore = Semaphore.new()
 	
@@ -153,6 +69,16 @@ func _ready():
 		var worker_thread = Thread.new()
 		thread_pool.append(worker_thread)
 		worker_thread.start(thread_worker_callback)
+		
+	# connect terrain and noise "changed" signals
+	if terrain_data != null and not terrain_data.changed.is_connected(_on_changed):
+		terrain_data.changed.connect(_on_changed)
+		
+	if noise_data != null and not noise_data.changed.is_connected(_on_changed):
+		noise_data.changed.connect(_on_changed)
+		
+	if texture_data != null and not texture_data.changed.is_connected(_on_changed):
+		texture_data.changed.connect(_on_texture_changed)
 	
 	
 func _process(_delta):
@@ -170,13 +96,13 @@ func _get_tool_buttons() -> Array:
 	return [
 		"draw_map_in_editor"
 	]
-	
-
-func _on_button_pressed():
-	draw_map_in_editor()
 
 
-func _on_changed(_new_value):
+func _on_texture_changed():
+	texture_data.apply_to_material(terrain_material)
+
+
+func _on_changed():
 	draw_map_in_editor()
 	
 	
@@ -189,52 +115,41 @@ func _exit_tree():
 	
 	
 func draw_map_in_editor() -> void:
-	var display: TerrainDisplay = get_node("TerrainDisplay")
-	if display == null:
-		print("No 'TerrainDisplay' node found, cannot draw map.")
-		return
-		
-	var mesh_display: MeshDisplay = get_node("MeshDisplay")
-	if mesh_display == null:
-		print("No 'MeshDisplay' node found, cannot draw mesh.")
+	if terrain_display == null or mesh_display == null:
+		print("'TerrainDisplay' or 'MeshDisplay' node is missing, cannot draw map.")
 		return
 		
 	var map_data: MapData = generate_map_data(Vector2.ZERO)
 	
 	match draw_mode:
 		DrawMode.DrawMode.NoiseMap:
-			display.draw_texture(TerrainGenerator.texture_from_height_map(map_data.height_map, map_chunk_size, map_chunk_size))
-		DrawMode.DrawMode.ColorMap:
-			display.draw_texture(TerrainGenerator.texture_from_color_map(map_data.color_map, map_chunk_size, map_chunk_size))
+			terrain_display.draw_texture(TerrainGenerator.texture_from_height_map(map_data.height_map, map_chunk_size, map_chunk_size))
 		DrawMode.DrawMode.Mesh:
 			mesh_display.draw_mesh(
-				generate_terrain_mesh(map_data.height_map, height_multiplier, mesh_height_curve, editor_preview_lod, use_flat_shading), 
-				TerrainGenerator.texture_from_color_map(map_data.color_map, map_chunk_size, map_chunk_size)
+				generate_terrain_mesh(map_data.height_map, terrain_data.height_multiplier, terrain_data.mesh_height_curve, editor_preview_lod, terrain_data.use_flat_shading)
 			)
 		DrawMode.DrawMode.FalloffMap:
-			display.draw_texture(TerrainGenerator.texture_from_height_map(TerrainGenerator.generate_falloff_map(map_chunk_size), map_chunk_size, map_chunk_size))
+			terrain_display.draw_texture(TerrainGenerator.texture_from_height_map(TerrainGenerator.generate_falloff_map(map_chunk_size), map_chunk_size, map_chunk_size))
 		_: 
 			return # ignore other possibilities at the moment
 
 
 func generate_map_data(center: Vector2) -> MapData:
-	var noise_map: Array[Array] = generate_noise_map(map_chunk_size + 2, map_chunk_size + 2, random_seed, noise_scale, octaves, persistance, lacunarity, center + offset, normalize_mode)
+	var noise_map: Array[Array] = generate_noise_map(map_chunk_size + 2, map_chunk_size + 2, noise_data.random_seed, noise_data.noise_scale, noise_data.octaves, noise_data.persistance, noise_data.lacunarity, center + noise_data.offset, noise_data.normalize_mode)
 	
-	# assign colors to each region
-	var color_map: Array[Color] = []
-	color_map.resize(map_chunk_size * map_chunk_size)
-	for x in range(map_chunk_size):
-		for y in range(map_chunk_size):
-			if use_falloff:
-				noise_map[x][y] = clamp(noise_map[x][y] - falloff_map[x][y], 0, 1)
-			var current_height: float = noise_map[x][y]
-			for i in range(regions.size()):
-				if current_height >= regions[i].height:
-					color_map[y * map_chunk_size + x] = regions[i].color
-				else:
-					break
+	if terrain_data.use_falloff:
+		if falloff_map == null:
+			falloff_map = TerrainGenerator.generate_falloff_map(map_chunk_size + 2)
+		
+		# assign colors to each region
+		for x in range(map_chunk_size + 2):
+			for y in range(map_chunk_size + 2):
+				if terrain_data.use_falloff:
+					noise_map[x][y] = clamp(noise_map[x][y] - falloff_map[x][y], 0, 1)
 	
-	return MapData.new(noise_map, color_map)
+	texture_data.update_mesh_heights(terrain_material, terrain_data.min_height, terrain_data.max_height)
+	
+	return MapData.new(noise_map)
 
 
 # generate a 2-dimensional array of random values for the specified resolution and scale
@@ -260,8 +175,8 @@ func generate_noise_map(_width: int, _height: int, _seed: int, _texture_scale: f
 	if _texture_scale <= 0:
 		_texture_scale = 0.0001
 		
-	var max_local_noise_height: float = FLOAT_MIN
-	var min_local_noise_height: float = FLOAT_MAX
+	var max_local_noise_height: float = Shared.FLOAT_MIN
+	var min_local_noise_height: float = Shared.FLOAT_MAX
 	
 	var half_width: float = _width / 2.0
 	var half_height: float = _height / 2.0
@@ -299,7 +214,7 @@ func generate_noise_map(_width: int, _height: int, _seed: int, _texture_scale: f
 				noise_map[x][y] = inverse_lerp(min_local_noise_height, max_local_noise_height, noise_map[x][y])
 			else:
 				var normalized_height: float = (noise_map[x][y] + 1) / (max_possible_noise_height / 1.25)
-				noise_map[x][y] = clamp(normalized_height, 0, INT_MAX)
+				noise_map[x][y] = clamp(normalized_height, 0, Shared.INT_MAX)
 			
 	return noise_map
 
@@ -454,7 +369,7 @@ func request_mesh_data(map_data: MapData, lod: int, completed_callback: Callable
 	
 # Will be executed on another thread
 func mesh_data_thread(map_data: MapData, lod: int, completed_callback: Callable) -> void:
-	var mesh_data: MeshData = generate_terrain_mesh(map_data.height_map, height_multiplier, mesh_height_curve, lod, use_flat_shading)
+	var mesh_data: MeshData = generate_terrain_mesh(map_data.height_map, terrain_data.height_multiplier, terrain_data.mesh_height_curve, lod, terrain_data.use_flat_shading)
 	var mesh_task: ThreadOperation = ThreadOperation.new(completed_callback, mesh_data)
 	
 	lock.lock()

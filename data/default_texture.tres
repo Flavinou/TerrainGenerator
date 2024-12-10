@@ -1,0 +1,7 @@
+[gd_resource type="Resource" script_class="TextureData" load_steps=2 format=3 uid="uid://di1rx3x5357fy"]
+
+[ext_resource type="Script" path="res://data/texture_data.gd" id="1_4m1d5"]
+
+[resource]
+script = ExtResource("1_4m1d5")
+auto_update = false

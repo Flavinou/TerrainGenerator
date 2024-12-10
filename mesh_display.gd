@@ -3,10 +3,13 @@ extends MeshInstance3D
 
 class_name MeshDisplay
 
-func draw_mesh(_mesh_data: MeshData, _texture: ImageTexture) -> void:
-	mesh = _mesh_data.create_mesh()
+@export var terrain_generator: TerrainGenerator
+
+#@onready var terrain_generator: TerrainGenerator = get_node("/root/TerrainGenerator")
+
+func draw_mesh(_mesh_data: MeshData) -> void:
+	if terrain_generator == null:
+		return
 	
-	var material: StandardMaterial3D = StandardMaterial3D.new()
-	material.albedo_texture = _texture
-	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-	set_surface_override_material(0, material)
+	mesh = _mesh_data.create_mesh()
+	scale = Vector3.ONE * terrain_generator.terrain_data.uniform_scale
